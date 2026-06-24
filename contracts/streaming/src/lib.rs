@@ -44,6 +44,8 @@ pub struct Stream {
     pub amount_per_second: i128,
     /// Whether the stream has been cancelled.
     pub cancelled: bool,
+    pub linear_amount: i128,
+    pub duration: i128
 }
 
 #[contracttype]
@@ -86,6 +88,11 @@ pub struct StreamTransferEvent {
     pub stream_id: u64,
     pub old_recipient: Address,
     pub new_recipient: Address,
+pub struct TopUpEvent {
+    pub stream_id: u64,
+    pub additional_amount: i128,
+    pub new_deposited_amount: i128,
+    pub new_amount_per_second: i128,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -119,6 +126,9 @@ impl StreamingContract {
         if params.cliff_amount < 0 || params.cliff_amount > params.total_amount {
             panic!("cliff_amount must be between 0 and total_amount");
         }
+        if params.recipient == sender {
+            panic!("sender cannot be the recipient");
+        }
 
         let duration = (params.end_time - params.start_time) as i128;
         let linear_amount = params.total_amount - params.cliff_amount;
@@ -149,6 +159,8 @@ impl StreamingContract {
             cliff_amount: params.cliff_amount,
             amount_per_second,
             cancelled: false,
+            linear_amount,
+            duration
         };
 
         // ── Persist stream ───────────────────────────────────────────────────
@@ -187,6 +199,74 @@ impl StreamingContract {
         stream.recipient = new_recipient.clone();
 
         // ── Persist stream ───────────────────────────────────────────────────
+    /// Top up an existing stream with additional funds.
+    ///
+    /// Increases `deposited_amount` and recalculates `amount_per_second` over
+    /// the remaining stream duration.
+    ///
+    /// The caller must have approved this contract to spend `additional_amount`
+    /// of the stream's token before calling.
+    pub fn top_up(env: Env, stream_id: u64, additional_amount: i128) {
+        let mut stream = Self::load_stream(&env, stream_id);
+        stream.sender.require_auth();
+
+        if stream.cancelled {
+            panic!("cannot top up a cancelled stream");
+        }
+
+        let now = env.ledger().timestamp();
+        if now >= stream.end_time {
+            panic!("cannot top up an ended stream");
+        }
+
+        if additional_amount <= 0 {
+            panic!("additional_amount must be > 0");
+        }
+
+        // ── Send funds ───────────────────────────────────────────────────────
+        let token_client = token::Client::new(&env, &stream.token);
+        token_client.transfer_from(
+            &env.current_contract_address(),
+            &stream.sender,
+            &env.current_contract_address(),
+            &additional_amount,
+        );
+
+        // ── Recalculate rate over remaining duration ──────────────────────────
+        // Already-vested funds keep their rate; only the remaining
+        // unlocked portion is recalculated with the new total.
+        //
+        // remaining_linear = (deposited - cliff_amount - withdrawn_linear) + additional
+        // amount_per_second = remaining_linear / remaining_seconds
+        //
+        // We compute remaining_seconds from now rather than cliff_time so a
+        // mid-stream top-up doesn't retroactively change already-vested amounts.
+        let remaining_seconds = (stream.end_time - now) as i128;
+
+        let already_vested = Self::vested_amount(&stream, now);
+        let remaining_deposited = stream
+            .deposited_amount
+            .checked_sub(already_vested)
+            .expect("deposited < vested — invariant broken");
+
+        let new_remaining = remaining_deposited
+            .checked_add(additional_amount)
+            .expect("remaining + additional overflow");
+
+        let new_amount_per_second = if remaining_seconds > 0 {
+            new_remaining / remaining_seconds
+        } else {
+            0
+        };
+
+        // ── Apply changes ────────────────────────────────────────────────────
+        stream.deposited_amount = stream
+            .deposited_amount
+            .checked_add(additional_amount)
+            .expect("deposited_amount overflow");
+
+        stream.amount_per_second = new_amount_per_second;
+
         env.storage()
             .persistent()
             .set(&DataKey::Stream(stream_id), &stream);
@@ -196,6 +276,16 @@ impl StreamingContract {
 
         StreamTransferEvent { stream_id, old_recipient, new_recipient }
             .publish(&env);
+        Self::extend_stream_ttl(&env, stream_id);
+
+        // ── Emit event ───────────────────────────────────────────────────────
+        TopUpEvent {
+            stream_id,
+            additional_amount,
+            new_deposited_amount: stream.deposited_amount,
+            new_amount_per_second,
+        }
+        .publish(&env);
     }
 
     // ── Write: Withdraw ──────────────────────────────────────────────────────
@@ -308,20 +398,58 @@ impl StreamingContract {
         Self::withdrawable_amount(&stream, now)
     }
 
-    /// Get all stream IDs where `address` is the sender.
-    pub fn get_sent_streams(env: Env, address: Address) -> Vec<u64> {
-        env.storage()
+    /// Get paginated stream IDs where `address` is the sender.
+    pub fn get_sent_streams(env: Env, address: Address, offset: u32, limit: u32) -> Vec<u64> {
+        let all: Vec<u64> = env
+            .storage()
             .persistent()
             .get(&DataKey::SentBy(address))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        let start = core::cmp::min(offset, all.len());
+        let end = core::cmp::min(offset + limit, all.len());
+        let mut result = Vec::new(&env);
+        let mut i = start;
+        while i < end {
+            result.push_back(all.get(i).unwrap());
+            i += 1;
+        }
+        result
     }
 
-    /// Get all stream IDs where `address` is the recipient.
-    pub fn get_received_streams(env: Env, address: Address) -> Vec<u64> {
-        env.storage()
+    /// Get paginated stream IDs where `address` is the recipient.
+    pub fn get_received_streams(env: Env, address: Address, offset: u32, limit: u32) -> Vec<u64> {
+        let all: Vec<u64> = env
+            .storage()
             .persistent()
             .get(&DataKey::ReceivedBy(address))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        let start = core::cmp::min(offset, all.len());
+        let end = core::cmp::min(offset + limit, all.len());
+        let mut result = Vec::new(&env);
+        let mut i = start;
+        while i < end {
+            result.push_back(all.get(i).unwrap());
+            i += 1;
+        }
+        result
+    }
+
+    /// Get total count of streams where `address` is the sender.
+    pub fn get_sent_stream_count(env: Env, address: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get::<_, Vec<u64>>(&DataKey::SentBy(address))
+            .map(|v| v.len())
+            .unwrap_or(0)
+    }
+
+    /// Get total count of streams where `address` is the recipient.
+    pub fn get_received_stream_count(env: Env, address: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get::<_, Vec<u64>>(&DataKey::ReceivedBy(address))
+            .map(|v| v.len())
+            .unwrap_or(0)
     }
 
     // ── Write: Bump TTL ──────────────────────────────────────────────────────
@@ -351,7 +479,7 @@ impl StreamingContract {
             return stream.deposited_amount;
         }
         let elapsed = (now - stream.start_time) as i128;
-        let linear = elapsed * stream.amount_per_second;
+        let linear = (elapsed * stream.linear_amount) / stream.duration;
         let unlocked = stream.cliff_amount + linear;
         // Cap at deposited (rounding safety).
         if unlocked > stream.deposited_amount {
@@ -426,6 +554,22 @@ impl StreamingContract {
             518_400, // ~30 days in ledgers
             518_400,
         );
+    }
+
+    fn vested_amount(stream: &Stream, now: u64) -> i128 {
+        if now < stream.cliff_time {
+            return 0;
+        }
+
+        let elapsed = (now.min(stream.end_time) - stream.cliff_time) as i128;
+        let linear = stream.amount_per_second
+            .checked_mul(elapsed)
+            .expect("amount_per_second * elapsed overflow");
+
+        stream.cliff_amount
+            .checked_add(linear)
+            .expect("cliff_amount * linear overflow")
+            .min(stream.deposited_amount)
     }
 }
 
