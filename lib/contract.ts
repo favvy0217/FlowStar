@@ -281,7 +281,7 @@ export async function createStream(
 
   // SDK v13 can't parse TransactionMetaV4 (protocol 22+) so returnValue is void.
   // Instead, query the sender's stream list and return the highest ID — that's the new stream.
-  const sentResult = await query('get_sent_streams', [new Address(sender).toScVal()])
+  const sentResult = await query('get_sent_streams', [new Address(sender).toScVal(), nativeToScVal(0, { type: 'u32' }), nativeToScVal(1000, { type: 'u32' })])
   const ids = scValToNative(sentResult) as bigint[]
   if (!ids || ids.length === 0) throw new Error('Stream created but could not retrieve ID')
   const newId = ids.reduce((a, b) => (a > b ? a : b))
@@ -400,8 +400,8 @@ export async function fetchStreamsForAddress(
   }
 
   const [sentIds, receivedIds] = await Promise.all([
-    query('get_sent_streams', [new Address(address).toScVal()]),
-    query('get_received_streams', [new Address(address).toScVal()]),
+    query('get_sent_streams', [new Address(address).toScVal(), nativeToScVal(0, { type: 'u32' }), nativeToScVal(1000, { type: 'u32' })]),
+    query('get_received_streams', [new Address(address).toScVal(), nativeToScVal(0, { type: 'u32' }), nativeToScVal(1000, { type: 'u32' })]),
   ])
 
   const allIds = [

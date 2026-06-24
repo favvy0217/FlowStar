@@ -350,15 +350,23 @@ fn test_stream_indexes() {
     let id1 = approve_and_create(t.default_params(now));
     let id2 = approve_and_create(t.default_params(now));
 
-    let sent = client.get_sent_streams(&t.sender);
+    let sent = client.get_sent_streams(&t.sender, &0, &100);
     assert_eq!(sent.len(), 2);
     assert!(sent.contains(&id1));
     assert!(sent.contains(&id2));
 
-    let received = client.get_received_streams(&t.recipient);
+    let received = client.get_received_streams(&t.recipient, &0, &100);
     assert_eq!(received.len(), 2);
     assert!(received.contains(&id1));
     assert!(received.contains(&id2));
+
+    // Test pagination and count
+    let sent_page1 = client.get_sent_streams(&t.sender, &0, &1);
+    assert_eq!(sent_page1.len(), 1);
+    let sent_page2 = client.get_sent_streams(&t.sender, &1, &1);
+    assert_eq!(sent_page2.len(), 1);
+    assert_eq!(client.get_sent_stream_count(&t.sender), 2);
+    assert_eq!(client.get_received_stream_count(&t.recipient), 2);
 }
 
 #[test]

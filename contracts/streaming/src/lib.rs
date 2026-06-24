@@ -273,20 +273,58 @@ impl StreamingContract {
         Self::withdrawable_amount(&stream, now)
     }
 
-    /// Get all stream IDs where `address` is the sender.
-    pub fn get_sent_streams(env: Env, address: Address) -> Vec<u64> {
-        env.storage()
+    /// Get paginated stream IDs where `address` is the sender.
+    pub fn get_sent_streams(env: Env, address: Address, offset: u32, limit: u32) -> Vec<u64> {
+        let all: Vec<u64> = env
+            .storage()
             .persistent()
             .get(&DataKey::SentBy(address))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        let start = core::cmp::min(offset, all.len());
+        let end = core::cmp::min(offset + limit, all.len());
+        let mut result = Vec::new(&env);
+        let mut i = start;
+        while i < end {
+            result.push_back(all.get(i).unwrap());
+            i += 1;
+        }
+        result
     }
 
-    /// Get all stream IDs where `address` is the recipient.
-    pub fn get_received_streams(env: Env, address: Address) -> Vec<u64> {
-        env.storage()
+    /// Get paginated stream IDs where `address` is the recipient.
+    pub fn get_received_streams(env: Env, address: Address, offset: u32, limit: u32) -> Vec<u64> {
+        let all: Vec<u64> = env
+            .storage()
             .persistent()
             .get(&DataKey::ReceivedBy(address))
-            .unwrap_or(Vec::new(&env))
+            .unwrap_or(Vec::new(&env));
+        let start = core::cmp::min(offset, all.len());
+        let end = core::cmp::min(offset + limit, all.len());
+        let mut result = Vec::new(&env);
+        let mut i = start;
+        while i < end {
+            result.push_back(all.get(i).unwrap());
+            i += 1;
+        }
+        result
+    }
+
+    /// Get total count of streams where `address` is the sender.
+    pub fn get_sent_stream_count(env: Env, address: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get::<_, Vec<u64>>(&DataKey::SentBy(address))
+            .map(|v| v.len())
+            .unwrap_or(0)
+    }
+
+    /// Get total count of streams where `address` is the recipient.
+    pub fn get_received_stream_count(env: Env, address: Address) -> u32 {
+        env.storage()
+            .persistent()
+            .get::<_, Vec<u64>>(&DataKey::ReceivedBy(address))
+            .map(|v| v.len())
+            .unwrap_or(0)
     }
 
     // ── Write: Bump TTL ──────────────────────────────────────────────────────
