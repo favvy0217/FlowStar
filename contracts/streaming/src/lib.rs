@@ -81,6 +81,13 @@ pub struct CancelEvent {
     pub sender_refund: i128,
 }
 
+#[soroban_sdk::contractevent]
+pub struct StreamTransferEvent {
+    pub stream_id: u64,
+    pub old_recipient: Address,
+    pub new_recipient: Address,
+}
+
 // ─── Contract ────────────────────────────────────────────────────────────────
 
 #[contract]
@@ -161,6 +168,34 @@ impl StreamingContract {
             .publish(&env);
 
         id
+    }
+
+     // ── Write: Transfer ────────────────────────────────────────────────────────
+
+    /// Transfer a token stream right to a new address
+    pub fn transfer_stream(env: Env, stream_id: u64, new_recipient: Address) {
+        let mut stream = Self::load_stream(&env, stream_id);
+        stream.recipient.require_auth();
+        let old_recipient = stream.recipient;
+        if stream.cancelled {
+            panic!("cannot transfer a cancelled stream");
+        }
+        if new_recipient == old_recipient {
+            panic!("new_recipient must differ from current recipient");
+        }
+
+        stream.recipient = new_recipient.clone();
+
+        // ── Persist stream ───────────────────────────────────────────────────
+        env.storage()
+            .persistent()
+            .set(&DataKey::Stream(stream_id), &stream);
+
+        Self::remove_from_index(&env, DataKey::ReceivedBy(old_recipient.clone()), stream_id);
+        Self::push_to_index(&env, DataKey::ReceivedBy(new_recipient.clone()), stream_id);
+
+        StreamTransferEvent { stream_id, old_recipient, new_recipient }
+            .publish(&env);
     }
 
     // ── Write: Withdraw ──────────────────────────────────────────────────────
@@ -366,6 +401,22 @@ impl StreamingContract {
             17_280,
             17_280,
         );
+    }
+
+    /// Append a stream ID to an address index list.
+    fn remove_from_index(env: &Env, key: DataKey, id: u64) {
+        let mut indexes: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or(Vec::new(env));
+
+        let position = indexes.iter().position(|id| id == id);
+        if let Some(i) = position {
+            indexes.remove(i as u32);
+        }
+
+        env.storage().persistent().set(&key, &indexes);
     }
 
     /// Extend the TTL of a stream entry (~30 days).
