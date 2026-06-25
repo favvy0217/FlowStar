@@ -264,8 +264,17 @@ function AutoWithdrawSection({
 }: {
   stream: import('@/types/stream').StreamData
 }) {
-  const { settings, updateSettings, lastAutoWithdraw, autoWithdrawPending } = useAutoWithdraw(stream)
+  const { settings, updateSettings, lastAutoWithdraw, autoWithdrawPending, withdrawalHistory } = useAutoWithdraw(stream)
   const [minDisplay, setMinDisplay] = useState('')
+  const [maxDisplay, setMaxDisplay] = useState('')
+  const [showHistory, setShowHistory] = useState(false)
+
+  const STRATEGY_OPTIONS: Array<{ value: import('@/hooks/use-auto-withdraw').WithdrawStrategy; label: string; description: string }> = [
+    { value: 'time-based', label: 'Time-based', description: 'Withdraw on fixed intervals' },
+    { value: 'threshold-based', label: 'Threshold-based', description: 'Withdraw when amount reaches threshold' },
+    { value: 'gas-optimized', label: 'Gas-optimized', description: 'Limit frequency to reduce gas costs' },
+    { value: 'max', label: 'Max amount', description: 'Always withdraw maximum available' },
+  ]
 
   return (
     <div className="rounded-2xl border border-border bg-card p-6 space-y-4">
@@ -289,31 +298,72 @@ function AutoWithdrawSection({
       </div>
 
       {settings.enabled && (
-        <div className="space-y-3 pt-1">
+        <div className="space-y-4 pt-1">
           <p className="text-xs text-muted-foreground">
-            Automatically withdraw available funds on an interval. The app must be open and your wallet connected.
+            Automatically withdraw funds using your chosen strategy. The app must be open and your wallet connected.
           </p>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">Frequency</Label>
-            <div className="flex flex-wrap gap-2">
-              {INTERVAL_OPTIONS.map((opt) => (
+            <Label className="text-xs">Strategy</Label>
+            <div className="space-y-2">
+              {STRATEGY_OPTIONS.map((opt) => (
                 <button
-                  key={opt.hours}
+                  key={opt.value}
                   type="button"
-                  onClick={() => updateSettings({ intervalHours: opt.hours })}
+                  onClick={() => updateSettings({ strategy: opt.value })}
                   className={
-                    'rounded-full border px-3 py-1 text-xs font-medium transition-colors ' +
-                    (settings.intervalHours === opt.hours
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:border-primary hover:text-primary')
+                    'w-full text-left p-3 rounded-lg border transition-colors ' +
+                    (settings.strategy === opt.value
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/50')
                   }
                 >
-                  {opt.label}
+                  <p className="text-sm font-medium">{opt.label}</p>
+                  <p className="text-xs text-muted-foreground">{opt.description}</p>
                 </button>
               ))}
             </div>
           </div>
+
+          {settings.strategy === 'time-based' && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Frequency</Label>
+              <div className="flex flex-wrap gap-2">
+                {INTERVAL_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.hours}
+                    type="button"
+                    onClick={() => updateSettings({ intervalHours: opt.hours })}
+                    className={
+                      'rounded-full border px-3 py-1 text-xs font-medium transition-colors ' +
+                      (settings.intervalHours === opt.hours
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:border-primary hover:text-primary')
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {settings.strategy === 'threshold-based' && (
+            <div className="space-y-1.5">
+              <Label htmlFor="threshold" className="text-xs">
+                Threshold (% of total deposited)
+              </Label>
+              <Input
+                id="threshold"
+                type="number"
+                min="1"
+                max="100"
+                value={settings.thresholdPercentage}
+                onChange={(e) => updateSettings({ thresholdPercentage: parseInt(e.target.value) || 50 })}
+                className="max-w-48"
+              />
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="min-amount" className="text-xs">
@@ -340,6 +390,31 @@ function AutoWithdrawSection({
             </p>
           </div>
 
+          <div className="space-y-1.5">
+            <Label htmlFor="max-limit" className="text-xs">
+              Maximum safety limit ({stream.token.symbol})
+            </Label>
+            <Input
+              id="max-limit"
+              type="number"
+              min="0"
+              step="any"
+              placeholder="0 (no limit)"
+              value={maxDisplay}
+              onChange={(e) => {
+                setMaxDisplay(e.target.value)
+                const raw = e.target.value
+                  ? parseTokenAmount(e.target.value, stream.token.decimals).toString()
+                  : '0'
+                updateSettings({ maxSafetyLimitRaw: raw })
+              }}
+              className="max-w-48"
+            />
+            <p className="text-xs text-muted-foreground">
+              Never withdraw more than this amount per transaction.
+            </p>
+          </div>
+
           {autoWithdrawPending && (
             <p className="text-xs text-primary">Auto-withdrawing...</p>
           )}
@@ -347,6 +422,29 @@ function AutoWithdrawSection({
             <p className="text-xs text-muted-foreground">
               Last auto-withdrawal: {new Date(lastAutoWithdraw).toLocaleTimeString()}
             </p>
+          )}
+
+          {withdrawalHistory.length > 0 && (
+            <div className="space-y-1.5 pt-2 border-t border-border">
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="text-xs text-primary hover:underline"
+              >
+                {showHistory ? 'Hide' : 'Show'} withdrawal history ({withdrawalHistory.length})
+              </button>
+              {showHistory && (
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {withdrawalHistory.map((entry, idx) => (
+                    <div key={idx} className="text-xs text-muted-foreground font-mono p-1.5 bg-secondary rounded">
+                      <p>{new Date(entry.timestamp).toLocaleTimeString()}</p>
+                      <p className={entry.error ? 'text-destructive' : 'text-primary'}>
+                        {entry.error ? `Error: ${entry.error}` : `Withdrew: ${entry.amount}`}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
