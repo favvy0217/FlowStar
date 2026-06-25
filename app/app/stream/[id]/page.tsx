@@ -16,7 +16,7 @@ import {
   Wallet,
   Share2,
   MessageCircle,
-  Twitter,
+  Send,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ConnectWalletButton } from '@/components/layout/connect-wallet-button'
@@ -663,7 +663,9 @@ function ShareButtons({ streamId }: { streamId: string }) {
               className="inline-flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary rounded transition-colors"
               aria-label="Share on Twitter"
             >
-              <Twitter className="size-4" />
+              <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M23 3a10.9 10.9 0 01-3.14 1.53 4.48 4.48 0 00-7.86 3v1A10.66 10.66 0 013 4s-4 9 5 13a11.64 11.64 0 01-7 2s9 5 20 5a9.5 9.5 0 00-9-5.5c4.75 2.25 7-7 7-7" />
+              </svg>
               Twitter
             </button>
             <button
