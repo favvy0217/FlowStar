@@ -50,6 +50,45 @@ export const KNOWN_TOKENS: readonly { address: string; symbol: string; decimals:
 ]
 
 const CUSTOM_TOKENS_KEY = 'flowstar:custom-tokens'
+const FAVORITE_TOKENS_KEY = 'flowstar:favorite-tokens'
+
+// ─── Verified Token List ──────────────────────────────────────────────────────
+interface VerifiedTokenEntry {
+  address: string
+  symbol: string
+  name: string
+  decimals: number
+  verified: boolean
+  category: string
+}
+
+let verifiedTokensCache: VerifiedTokenEntry[] | null = null
+
+async function loadVerifiedTokens(): Promise<VerifiedTokenEntry[]> {
+  if (verifiedTokensCache) return verifiedTokensCache
+
+  try {
+    const response = await fetch('/lib/tokens.json')
+    if (!response.ok) throw new Error('Failed to load verified tokens')
+    const data = await response.json() as { tokens: VerifiedTokenEntry[] }
+    verifiedTokensCache = data.tokens
+    return data.tokens
+  } catch (error) {
+    console.warn('Failed to load verified tokens list:', error)
+    return []
+  }
+}
+
+export function isVerifiedToken(address: string): boolean {
+  return KNOWN_TOKENS.some((t) => t.address === address)
+}
+
+export function getVerifiedTokenInfo(address: string): VerifiedTokenEntry | null {
+  const entry = verifiedTokensCache?.find((t) => t.address === address)
+  return entry || null
+}
+
+// ─── Custom Tokens ────────────────────────────────────────────────────────────
 
 export function getCustomTokens(): { address: string; symbol: string; decimals: number }[] {
   if (typeof window === 'undefined') return []
@@ -71,6 +110,33 @@ export function saveCustomToken(token: { address: string; symbol: string; decima
 export function removeCustomToken(address: string) {
   const updated = getCustomTokens().filter((t) => t.address !== address)
   localStorage.setItem(CUSTOM_TOKENS_KEY, JSON.stringify(updated))
+}
+
+// ─── Token Favorites ──────────────────────────────────────────────────────────
+
+export function getFavoriteTokens(): string[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(FAVORITE_TOKENS_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+export function toggleFavoriteToken(address: string) {
+  const favorites = getFavoriteTokens()
+  const index = favorites.indexOf(address)
+  if (index >= 0) {
+    favorites.splice(index, 1)
+  } else {
+    favorites.push(address)
+  }
+  localStorage.setItem(FAVORITE_TOKENS_KEY, JSON.stringify(favorites))
+}
+
+export function isFavoriteToken(address: string): boolean {
+  return getFavoriteTokens().includes(address)
 }
 
 const EXPLORER_NETWORK = NETWORK.name === 'testnet' ? 'testnet' : 'public'
