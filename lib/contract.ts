@@ -27,6 +27,55 @@ async function signTx(xdrStr: string): Promise<string> {
 
 const FEE_BUFFER = 1.15 // 15% above minimum to ensure inclusion
 
+// ─── Retry / timeout ──────────────────────────────────────────────────────────
+
+const REQUEST_TIMEOUT_MS = 30_000
+const POLL_TIMEOUT_MS    = 60_000
+const MAX_RETRIES        = 3
+const RETRY_DELAYS_MS    = [1_000, 2_000, 4_000] as const
+
+function isRetryableError(err: unknown): boolean {
+  if (err instanceof TypeError) return true // network failure
+  if (err instanceof Error && (err.message.includes('503') || err.message.includes('429'))) return true
+  const status =
+    (err as { status?: number })?.status ??
+    (err as { response?: { status?: number } })?.response?.status
+  return status === 429 || status === 503
+}
+
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    try {
+      const res = await fetch(url, { ...init, signal: controller.signal })
+      if (res.status !== 429 && res.status !== 503) return res
+      lastErr = new Error(`HTTP ${res.status}`)
+    } catch (err) {
+      lastErr = err
+    } finally {
+      clearTimeout(timer)
+    }
+    if (attempt < MAX_RETRIES) await new Promise<void>((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
+  }
+  throw lastErr
+}
+
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastErr = err
+      if (!isRetryableError(err)) throw err
+    }
+    if (attempt < MAX_RETRIES) await new Promise<void>((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]))
+  }
+  throw lastErr
+}
+
 /** Build and simulate a contract call, returning the prepared tx and estimated fee. */
 async function buildAndSimulate(
   network: NetworkName,
@@ -38,7 +87,7 @@ async function buildAndSimulate(
   const config = getNetworkConfig(network)
   const server = getServer(network)
   const contract = new Contract(contractAddress)
-  const account = await server.getAccount(signerAddress)
+  const account = await withRetry(() => server.getAccount(signerAddress))
 
   const tx = new TransactionBuilder(account, {
     fee: '100000',
@@ -48,7 +97,7 @@ async function buildAndSimulate(
     .setTimeout(180)
     .build()
 
-  const sim = await server.simulateTransaction(tx)
+  const sim = await withRetry(() => server.simulateTransaction(tx))
   if (StellarRpc.Api.isSimulationError(sim)) {
     throw new Error(`Simulation failed: ${sim.error}`)
   }
@@ -75,6 +124,7 @@ async function invoke(
   // Submit the signed XDR directly via the RPC JSON-RPC endpoint.
   // We bypass TransactionBuilder.fromXDR because Freighter may return a
   // FeeBumpTransaction envelope (type 4) which fromXDR can't handle.
+  const rpcResponse = await fetchWithRetry(NETWORK.rpcUrl, {
   const rpcResponse = await fetch(config.rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -99,11 +149,15 @@ async function invoke(
     throw new Error(`Transaction failed: ${sendResult.errorResultXdr ?? 'unknown error'}`)
   }
 
-  // Poll until finalized
+  // Poll until finalized (max 60 s)
   const hash = sendResult.hash
   let pollStatus = 'PENDING'
+  const pollDeadline = Date.now() + POLL_TIMEOUT_MS
 
   while (pollStatus !== 'SUCCESS' && pollStatus !== 'FAILED') {
+    if (Date.now() >= pollDeadline) throw new Error('Transaction confirmation timed out after 60s')
+    await new Promise<void>((r) => setTimeout(r, 2000))
+    const pollRes = await fetchWithRetry(NETWORK.rpcUrl, {
     await new Promise((r) => setTimeout(r, 2000))
     const pollRes = await fetch(config.rpcUrl, {
       method: 'POST',
@@ -144,7 +198,7 @@ async function query(
     sequence: () => BigInt(0),
     incrementSequenceNumber: () => {},
   }
-  const account = await server.getAccount(dummyKeypair.accountId())
+  const account = await withRetry(() => server.getAccount(dummyKeypair.accountId()))
   const tx = new TransactionBuilder(account, {
     fee: '100',
     networkPassphrase: config.passphrase,
@@ -153,7 +207,7 @@ async function query(
     .setTimeout(10)
     .build()
 
-  const sim = await server.simulateTransaction(tx)
+  const sim = await withRetry(() => server.simulateTransaction(tx))
   if (StellarRpc.Api.isSimulationError(sim)) {
     throw new Error(`Query failed: ${sim.error}`)
   }
@@ -257,6 +311,7 @@ export async function createStream(
 
   // Step 1: approve the streaming contract to pull `totalAmount` from the sender.
   // The allowance needs to outlast the simulation ledger — set it to current + 500 ledgers.
+  const currentLedger = (await withRetry(() => server.getLatestLedger())).sequence
   const server = getServer(network)
   const currentLedger = (await server.getLatestLedger()).sequence
   const expirationLedger = currentLedger + 500
@@ -368,8 +423,8 @@ export async function getTokenMetadata(
     const config = getNetworkConfig(network)
     const server = getServer(network)
     const contract = new Contract(tokenAddress)
-    const dummyAccount = await server.getAccount(
-      'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+    const dummyAccount = await withRetry(() =>
+      server.getAccount('GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN'),
     )
 
     const buildSimTx = (method: string) => {
@@ -380,7 +435,7 @@ export async function getTokenMetadata(
         .addOperation(contract.call(method))
         .setTimeout(10)
         .build()
-      return server.simulateTransaction(tx)
+      return withRetry(() => server.simulateTransaction(tx))
     }
 
     const [symSim, decSim] = await Promise.all([
@@ -419,8 +474,8 @@ export async function getTokenBalance(
   try {
     const server = getServer(network)
     const contract = new Contract(tokenAddress)
-    const account = await server.getAccount(
-      'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+    const account = await withRetry(() =>
+      server.getAccount('GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN'),
     )
     const tx = new TransactionBuilder(account, {
       fee: '100',
@@ -430,7 +485,7 @@ export async function getTokenBalance(
       .setTimeout(10)
       .build()
 
-    const sim = await server.simulateTransaction(tx)
+    const sim = await withRetry(() => server.simulateTransaction(tx))
     if (StellarRpc.Api.isSimulationError(sim)) return 0n
     const retval = (sim as StellarRpc.Api.SimulateTransactionSuccessResponse).result?.retval
     if (!retval) return 0n
