@@ -343,7 +343,7 @@ export async function createStream(
     ),
   )
 
-  const result = await invoke(
+  await invoke(
     network,
     'create_stream',
     [new Address(sender).toScVal(), params],

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback } from 'react'
+import { toast } from 'sonner'
 import {
   createStream as createStreamCall,
   withdrawFromStream,
@@ -11,12 +12,35 @@ import { useNetwork } from '@/components/providers/network-provider'
 import type { FeeEstimate } from '@/lib/contract'
 import { invalidateStreams } from '@/hooks/use-streams'
 import { useWallet } from '@/hooks/use-wallet'
+import { useNetwork } from '@/components/providers/network-provider'
 import { getWithdrawableAmount } from '@/lib/stream-utils'
+import { mapError, categoryLabel } from '@/lib/error-messages'
 import type { CreateStreamInput, StreamData } from '@/types/stream'
 
 export interface WithdrawAllResult {
   succeeded: number
   failed: number
+}
+
+function showErrorToast(err: unknown) {
+  const mapped = mapError(err)
+  const category = categoryLabel(mapped.category)
+  toast.error(mapped.message, {
+    description: mapped.suggestion,
+    duration: 7000,
+    action: mapped.details
+      ? {
+          label: 'Details',
+          onClick: () => {
+            const short = mapped.details!.length > 200
+              ? mapped.details!.slice(0, 200) + '…'
+              : mapped.details!
+            toast.info(short, { duration: 10000 })
+          },
+        }
+      : undefined,
+  })
+  return `[${category}] ${mapped.message}`
 }
 
 export function useContract() {
@@ -32,11 +56,11 @@ export function useContract() {
       setError(null)
       try {
         const result = await fn()
-        invalidateStreams() // re-fetch all stream hooks after any write
+        invalidateStreams()
         return result
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Transaction failed'
-        setError(message)
+        const displayMessage = showErrorToast(err)
+        setError(displayMessage)
         throw err
       } finally {
         setPending(false)
@@ -52,11 +76,18 @@ export function useContract() {
 
   const withdraw = useCallback(
     (id: string, amount: bigint) => run(() => withdrawFromStream(id, amount, network)),
+    (input: CreateStreamInput) => run(() => createStreamCall(network, input, address!)),
+    [run, network, address],
+  )
+
+  const withdraw = useCallback(
+    (id: string, amount: bigint) => run(() => withdrawFromStream(network, id, amount)),
     [run, network],
   )
 
   const cancel = useCallback(
     (id: string) => run(() => cancelStreamCall(id, network)),
+    (id: string) => run(() => cancelStreamCall(network, id)),
     [run, network],
   )
 
@@ -70,6 +101,7 @@ export function useContract() {
       }
     },
     [address, isConnected, network],
+    [network, address, isConnected],
   )
 
   const withdrawAll = useCallback(
@@ -95,9 +127,15 @@ export function useContract() {
         try {
           const amount = getWithdrawableAmount(s, Math.floor(Date.now() / 1000))
           await withdrawFromStream(s.id, amount, network)
+          await withdrawFromStream(network, s.id, amount)
           succeeded++
-        } catch {
+        } catch (err) {
           failed++
+          const mapped = mapError(err)
+          toast.error(`Stream #${s.id}: ${mapped.message}`, {
+            description: mapped.suggestion,
+            duration: 5000,
+          })
         }
       }
 
@@ -105,12 +143,13 @@ export function useContract() {
       setPending(false)
 
       if (failed > 0 && succeeded === 0) {
-        setError('All withdrawals failed.')
+        setError('All withdrawals failed. See error toasts for details.')
       }
 
       return { succeeded, failed }
     },
     [address, isConnected, network],
+    [network, address, isConnected],
   )
 
   return { createStream, withdraw, cancel, withdrawAll, estimateFee, pending, error }
