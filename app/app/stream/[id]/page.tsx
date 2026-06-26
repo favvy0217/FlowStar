@@ -55,6 +55,7 @@ import { explorerUrl } from '@/lib/stellar'
 import { useNetwork } from '@/components/providers/network-provider'
 import { useAutoWithdraw } from '@/hooks/use-auto-withdraw'
 import { UnlockChart } from '@/components/streams/unlock-chart'
+import { StreamTimeline } from '@/components/streams/stream-timeline'
 import { bumpStreamTtl } from '@/lib/contract'
 
 // ─── Address copy button ────────────────────────────────────────────────────
@@ -703,6 +704,7 @@ function StreamDetail({ id }: { id: string }) {
   const { stream, loading } = useStream(id)
   const { address, isConnected } = useWallet()
   const { network, config } = useNetwork()
+  const router = useRouter()
   const now = useNow(1000)
   const [withdrawOpen, setWithdrawOpen] = useState(false)
   const [cancelOpen, setCancelOpen] = useState(false)
@@ -742,6 +744,26 @@ function StreamDetail({ id }: { id: string }) {
   const isSender = address === stream.sender
   const canWithdraw = isRecipient && !stream.cancelled && withdrawable > 0n
   const canCancel = isSender && !stream.cancelled && status !== 'completed'
+
+  function handleDuplicate() {
+    const durationSecs = Number(stream.endTime - stream.startTime)
+    const cliffSecs = Number(stream.cliffTime - stream.startTime)
+    const hasCliff = stream.cliffTime > stream.startTime
+    const params = new URLSearchParams({
+      clone: stream.id,
+      recipient: stream.recipient,
+      token: stream.token.address,
+      amount: (Number(stream.depositedAmount) / Math.pow(10, stream.token.decimals)).toString(),
+      duration: durationSecs.toString(),
+    })
+    if (hasCliff) {
+      params.set('cliff', cliffSecs.toString())
+      if (stream.cliffAmount > 0n) {
+        params.set('cliffAmount', (Number(stream.cliffAmount) / Math.pow(10, stream.token.decimals)).toString())
+      }
+    }
+    router.push(`/app/create?${params.toString()}`)
+  }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -849,7 +871,7 @@ function StreamDetail({ id }: { id: string }) {
         )}
 
         {/* Actions */}
-        {(canWithdraw || canCancel) && (
+        {(canWithdraw || canCancel || isSender) && (
           <div className="flex flex-wrap gap-2 pt-1 border-t border-border">
             {canWithdraw && (
               <Button onClick={() => setWithdrawOpen(true)} className="gap-1.5">
@@ -867,6 +889,16 @@ function StreamDetail({ id }: { id: string }) {
                 onClick={() => setCancelOpen(true)}
               >
                 Cancel stream
+              </Button>
+            )}
+            {isSender && (
+              <Button
+                variant="outline"
+                onClick={handleDuplicate}
+                className="gap-1.5"
+              >
+                <Copy className="size-4" />
+                Duplicate stream
               </Button>
             )}
           </div>
@@ -945,6 +977,9 @@ function StreamDetail({ id }: { id: string }) {
           <span className="capitalize">{network}</span>
         </DetailRow>
       </div>
+
+      {/* Transaction history timeline */}
+      <StreamTimeline streamId={stream.id} />
 
       {/* Auto-withdraw (recipients only, active streams) */}
       {isRecipient && !stream.cancelled && status !== 'completed' && (
