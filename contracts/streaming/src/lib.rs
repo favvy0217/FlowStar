@@ -575,3 +575,4 @@ impl StreamingContract {
 
 mod test;
 mod test_security;
+mod bench;
