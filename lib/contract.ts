@@ -294,9 +294,9 @@ export async function estimateCreateStreamFee(
 }
 
 export async function createStream(
-  network: NetworkName,
   input: CreateStreamInput,
   sender: string,
+  network: NetworkName = 'testnet',
 ): Promise<string> {
   const config = getNetworkConfig(network)
   const isMockMode = !config.streamContractId
@@ -361,9 +361,9 @@ export async function createStream(
 }
 
 export async function withdrawFromStream(
-  network: NetworkName,
   id: string,
   amount: bigint,
+  network: NetworkName = 'testnet',
 ): Promise<string | null> {
   const config = getNetworkConfig(network)
   const isMockMode = !config.streamContractId
@@ -389,8 +389,8 @@ export async function withdrawFromStream(
 }
 
 export async function cancelStream(
-  network: NetworkName,
   id: string,
+  network: NetworkName = 'testnet',
 ): Promise<string | null> {
   const config = getNetworkConfig(network)
   const isMockMode = !config.streamContractId
@@ -413,8 +413,8 @@ export async function cancelStream(
 }
 
 export async function getTokenMetadata(
-  network: NetworkName,
   tokenAddress: string,
+  network: NetworkName = 'testnet',
 ): Promise<TokenInfo | null> {
   try {
     const config = getNetworkConfig(network)
@@ -459,9 +459,9 @@ export async function getTokenMetadata(
 }
 
 export async function getTokenBalance(
-  network: NetworkName,
   tokenAddress: string,
   accountAddress: string,
+  network: NetworkName = 'testnet',
 ): Promise<bigint> {
   const config = getNetworkConfig(network)
   const isMockMode = !config.streamContractId

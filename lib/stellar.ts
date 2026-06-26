@@ -61,12 +61,20 @@ export function getNetworkConfig(network: NetworkName): NetworkConfig {
     network === 'testnet'
       ? process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID_TESTNET ?? ''
       : process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID_MAINNET ?? ''
-  
+
   return {
     ...base,
     streamContractId: contractId,
   }
 }
+
+export const KNOWN_TOKENS = [...NETWORKS.testnet.knownTokens, ...NETWORKS.mainnet.knownTokens]
+export const NETWORK: NetworkName = (process.env.NEXT_PUBLIC_STELLAR_NETWORK as NetworkName | undefined) ?? 'testnet'
+export const STREAM_CONTRACT_ID = NETWORK === 'mainnet'
+  ? process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID_MAINNET ?? ''
+  : process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID_TESTNET ?? ''
+
+const CUSTOM_TOKENS_KEY = 'flowstar:custom-tokens'
 const FAVORITE_TOKENS_KEY = 'flowstar:favorite-tokens'
 
 // ─── Verified Token List ──────────────────────────────────────────────────────

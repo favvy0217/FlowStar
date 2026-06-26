@@ -8,6 +8,7 @@ import {
   cancelStream as cancelStreamCall,
   estimateCreateStreamFee,
 } from '@/lib/contract'
+import { useNetwork } from '@/components/providers/network-provider'
 import type { FeeEstimate } from '@/lib/contract'
 import { invalidateStreams } from '@/hooks/use-streams'
 import { useWallet } from '@/hooks/use-wallet'
@@ -69,6 +70,12 @@ export function useContract() {
   )
 
   const createStream = useCallback(
+    (input: CreateStreamInput) => run(() => createStreamCall(input, address!, network)),
+    [run, address, network],
+  )
+
+  const withdraw = useCallback(
+    (id: string, amount: bigint) => run(() => withdrawFromStream(id, amount, network)),
     (input: CreateStreamInput) => run(() => createStreamCall(network, input, address!)),
     [run, network, address],
   )
@@ -79,6 +86,7 @@ export function useContract() {
   )
 
   const cancel = useCallback(
+    (id: string) => run(() => cancelStreamCall(id, network)),
     (id: string) => run(() => cancelStreamCall(network, id)),
     [run, network],
   )
@@ -92,6 +100,7 @@ export function useContract() {
         return null
       }
     },
+    [address, isConnected, network],
     [network, address, isConnected],
   )
 
@@ -117,6 +126,7 @@ export function useContract() {
         const s = withdrawable[i]
         try {
           const amount = getWithdrawableAmount(s, Math.floor(Date.now() / 1000))
+          await withdrawFromStream(s.id, amount, network)
           await withdrawFromStream(network, s.id, amount)
           succeeded++
         } catch (err) {
@@ -138,6 +148,7 @@ export function useContract() {
 
       return { succeeded, failed }
     },
+    [address, isConnected, network],
     [network, address, isConnected],
   )
 
