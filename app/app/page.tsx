@@ -12,12 +12,15 @@ import { Button } from '@/components/ui/button'
 import { useStreams } from '@/hooks/use-streams'
 import { useContract } from '@/hooks/use-contract'
 import { useNow } from '@/hooks/use-now'
+import { useWallet } from '@/hooks/use-wallet'
 import { getWithdrawableAmount } from '@/lib/stream-utils'
+import { ActivityFeed } from '@/components/streams/activity-feed'
 
 function Dashboard() {
   const { sent, received, all, loading } = useStreams()
   const { withdrawAll, pending } = useContract()
   const now = useNow(1000)
+  const { address: walletAddress } = useWallet()
   const [withdrawProgress, setWithdrawProgress] = useState<{ current: number; total: number } | null>(null)
 
   const withdrawableStreams = received.filter((s) => getWithdrawableAmount(s, now) > 0n)
@@ -83,6 +86,7 @@ function Dashboard() {
           <TabsTrigger value="all">All ({all.length})</TabsTrigger>
           <TabsTrigger value="received">Receiving ({received.length})</TabsTrigger>
           <TabsTrigger value="sent">Sending ({sent.length})</TabsTrigger>
+          <TabsTrigger value="activity">Activity</TabsTrigger>
         </TabsList>
 
         <TabsContent value="all" className="mt-4">
@@ -126,6 +130,10 @@ function Dashboard() {
               ))}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="activity" className="mt-4">
+          <ActivityFeed walletAddress={walletAddress ?? null} />
         </TabsContent>
       </Tabs>
     </div>

@@ -21,6 +21,7 @@ const NAV_LINKS = [
   { href: '/app', label: 'Dashboard' },
   { href: '/app/streams', label: 'Streams' },
   { href: '/app/analytics', label: 'Analytics' },
+  { href: '/app/settings', label: 'Settings' },
 ]
 
 export function Navbar() {
