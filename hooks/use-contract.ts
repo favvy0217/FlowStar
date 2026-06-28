@@ -9,7 +9,6 @@ import {
   estimateCreateStreamFee,
   type TxStep,
 } from '@/lib/contract'
-import { useNetwork } from '@/components/providers/network-provider'
 import type { FeeEstimate } from '@/lib/contract'
 import { invalidateStreams } from '@/hooks/use-streams'
 import { useWallet } from '@/hooks/use-wallet'
@@ -94,6 +93,14 @@ export function useContract() {
     [run, address, network],
   )
 
+  // const withdraw = useCallback(
+  //   (id: string, amount: bigint) => run(() => withdrawFromStream(id, amount, network)),
+  //   (input: CreateStreamInput) => run(() => createStreamCall(network, input, address!)),
+  //   [run, network, address],
+  // )
+
+  const withdraw = useCallback(
+    (id: string, amount: bigint) => run(() => withdrawFromStream(id, amount, network)),
   const withdraw = useCallback(
     (id: string, amount: bigint) =>
       run('Withdraw', (onStep) => withdrawFromStream(id, amount, network, onStep)),
@@ -101,6 +108,7 @@ export function useContract() {
   )
 
   const cancel = useCallback(
+    (id: string) => run(() => cancelStreamCall(id, network)),
     (id: string) =>
       run('Cancel stream', (onStep) => cancelStreamCall(id, network, onStep)),
     [run, network],
