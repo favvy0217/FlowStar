@@ -14,12 +14,15 @@ import { ComponentErrorBoundary } from '@/components/error-boundary/component-er
 import { useStreams } from '@/hooks/use-streams'
 import { useContract } from '@/hooks/use-contract'
 import { useNow } from '@/hooks/use-now'
+import { useWallet } from '@/hooks/use-wallet'
 import { getWithdrawableAmount } from '@/lib/stream-utils'
+import { ActivityFeed } from '@/components/streams/activity-feed'
 
 function Dashboard() {
   const { sent, received, all, loading } = useStreams()
   const { withdrawAll, pending } = useContract()
   const now = useNow(1000)
+  const { address: walletAddress } = useWallet()
   const [withdrawProgress, setWithdrawProgress] = useState<{ current: number; total: number } | null>(null)
 
   const withdrawableStreams = received.filter((s) => getWithdrawableAmount(s, now) > 0n)
@@ -82,6 +85,13 @@ function Dashboard() {
       </SectionErrorBoundary>
 
       {/* Stream list */}
+      <Tabs defaultValue="all">
+        <TabsList>
+          <TabsTrigger value="all">All ({all.length})</TabsTrigger>
+          <TabsTrigger value="received">Receiving ({received.length})</TabsTrigger>
+          <TabsTrigger value="sent">Sending ({sent.length})</TabsTrigger>
+          <TabsTrigger value="activity">Activity</TabsTrigger>
+        </TabsList>
       <SectionErrorBoundary sectionName="Stream list">
         <Tabs defaultValue="all">
           <TabsList>
@@ -122,6 +132,25 @@ function Dashboard() {
             )}
           </TabsContent>
 
+        <TabsContent value="sent" className="mt-4">
+          {sent.length === 0 ? (
+            <EmptyStreams
+              title="No outgoing streams"
+              description="Create a stream to start sending tokens that unlock over time."
+            />
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {sent.map((s) => (
+                <StreamCard key={s.id} stream={s} />
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="activity" className="mt-4">
+          <ActivityFeed walletAddress={walletAddress ?? null} />
+        </TabsContent>
+      </Tabs>
           <TabsContent value="sent" className="mt-4">
             {sent.length === 0 ? (
               <EmptyStreams
